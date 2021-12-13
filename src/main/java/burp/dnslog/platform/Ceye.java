@@ -1,5 +1,6 @@
 package burp.dnslog.platform;
 
+import burp.BurpExtender;
 import burp.dnslog.IDnslog;
 import burp.utils.HttpUtils;
 import burp.utils.Utils;
@@ -13,11 +14,11 @@ import java.util.concurrent.TimeUnit;
 
 public class Ceye implements IDnslog {
     OkHttpClient client = new OkHttpClient().newBuilder().
-            connectTimeout(3000, TimeUnit.SECONDS).
-            callTimeout(3000, TimeUnit.SECONDS).build();
+            connectTimeout(30, TimeUnit.SECONDS).
+            callTimeout(30, TimeUnit.SECONDS).build();
     String platformUrl = "http://api.ceye.io/";
-    String rootDomain = "<rootDomain>";
-    String token = "<token>";
+    String rootDomain = "6i81ez.ceye.io";
+    String token = "60d94b19a4ee341e556a2021ffe2cec0";
 
     @Override
     public String getName() {
@@ -26,7 +27,7 @@ public class Ceye implements IDnslog {
 
     @Override
     public String getNewDomain() {
-        return Utils.getCurrentTimeMillis() + Utils.GetRandomString(5) + "." + rootDomain;
+        return Utils.GetRandomString(6) + "." + rootDomain;
     }
 
     @Override

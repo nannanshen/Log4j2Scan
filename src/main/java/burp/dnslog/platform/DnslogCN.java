@@ -57,7 +57,7 @@ public class DnslogCN implements IDnslog {
 
     @Override
     public String getNewDomain() {
-        return Utils.getCurrentTimeMillis() + Utils.GetRandomString(5) + "." + rootDomain;
+        return Utils.GetRandomString(5) + "." + rootDomain;
     }
 
     public boolean flushCache() {
